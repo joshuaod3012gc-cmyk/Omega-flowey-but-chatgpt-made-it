@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Omega Flowey - Full Hard Mode with Continuous Music</title>
+<style>
+body { margin:0; background:black; overflow:hidden; }
+canvas { display:block; margin:auto; background:black; touch-action:none; }
+#ui { position:absolute; top:10px; left:50%; transform:translateX(-50%); color:white; font-family:monospace; }
+#dialogue { position:absolute; bottom:0; width:100%; background:black; color:white; padding:10px; display:none; font-family:monospace; }
+#controls { position:absolute; bottom:90px; left:50%; transform:translateX(-50%); display:flex; gap:10px; }
+.btn { width:60px; height:60px; border-radius:50%; background:rgba(255,255,255,0.25); color:white; text-align:center; line-height:60px; font-size:24px; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:none; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<canvas id="game" width="640" height="480"></canvas>
+<div id="ui"></div>
+<div id="dialogue"></div>
+
+<div id="controls">
+  <div class="btn" data="left">◀</div>
+  <div class="btn" data="up">▲</div>
+  <div class="btn" data="down">▼</div>
+  <div class="btn" data="right">▶</div>
+</div>
+
+<!-- Music -->
+<audio id="bgm" src="https://github.com/joshuaod3012gc-cmyk/Omega-flowey-but-it-s-made-by-chat-gpt-music-source/raw/refs/heads/main/Undertale_Finale_Dual_Mix_KLICKAUD.mp3" loop></audio>
+
+<script>
+const c = document.getElementById("game");
+const ctx = c.getContext("2d");
+const ui = document.getElementById("ui");
+const dlg = document.getElementById("dialogue");
+const bgm = document.getElementById("bgm");
+
+// Images
+const omega = new Image();
+omega.src = "https://upload.wikimedia.org/wikipedia/commons/3/33/Omega_flowey.webp";
+const flowey = new Image();
+flowey.src = "https://static.wikia.nocookie.net/villains/images/7/76/FloweyTransparent.png";
+const soulImg = new Image();
+soulImg.src = "https://upload.wikimedia.org/wikipedia/commons/a/a5/Undertale.png";
+
+// Battle box
+const box = { x:170, y:120, w:300, h:220 };
+
+// Player soul
+let soul = { x: box.x+box.w/2, y: box.y+box.h/2, speed:3, hp:20 };
+
+// Game state
+let state="intro"; // intro, fight, soulcollect, ending, dead, crash
+let phase=0;
+let timer=0;
+let bullets=[];
+let move = { left:false, right:false, up:false, down:false };
+
+// Soul collection system
+let collectedSouls=0;
+let souls = [];
+
+// Dialogue helper
+function say(lines, cb){
+  let i=0;
+  dlg.style.display="block";
+  dlg.innerText=lines[i];
+  let iv=setInterval(()=>{
+    i++;
+    if(i>=lines.length){
+      clearInterval(iv);
+      dlg.style.display="none";
+      cb && cb();
+    } else dlg.innerText = lines[i];
+  }, 1400);
+}
+
+// Spawn bullets
+function spawn(x,y,vx,vy){ bullets.push({x,y,vx,vy}); }
+
+// Hit detection
+function hit(b){ return Math.hypot(b.x-soul.x,b.y-soul.y)<10; }
+
+// Death trigger
+function die(){ state="crash"; timer=0; bullets=[]; }
+
+// Phase bullet patterns (hardcore, randomized)
+function attackPattern(){
+  if(phase===0 && timer%6===0){
+    const startY = box.y + Math.random()*box.h;
+    spawn(box.x, startY, 2 + Math.random()*1.5, (Math.random()-0.5)*2);
+  }
+  if(phase===1 && timer%5===0){
+    const a = Math.random()*Math.PI*2;
+    spawn(320,200,Math.cos(a)*3,Math.sin(a)*3);
+  }
+  if(phase===2 && timer%4===0){
+    const startX = box.x + Math.random()*box.w;
+    spawn(startX, box.y, 0,3+Math.random()*2);
+  }
+  if(phase===3 && timer%6===0){
+    for(let i=0;i<8;i++){
+      const angle=i*Math.PI/4 + (Math.random()-0.5)*0.5;
+      spawn(320+(Math.random()-0.5)*30,200+(Math.random()-0.5)*30,Math.cos(angle)*3.5,Math.sin(angle)*3.5);
+    }
+  }
+  if(phase===4 && timer%4===0){
+    spawn(Math.random()*box.w+box.x, box.y, 0,4+Math.random()*2);
+  }
+  if(phase>=5 && timer%3===0){
+    const angle=Math.random()*Math.PI*2;
+    spawn(320+(Math.random()-0.5)*30,200+(Math.random()-0.5)*30,Math.cos(angle)*3.5,Math.sin(angle)*3.5);
+  }
+}
+
+// Update loop
+function loop(){
+  ctx.clearRect(0,0,640,480);
+
+  // Draw Omega Flowey if alive
+  if(state!=="dead" && state!=="crash" && state!=="ending"){
+    ctx.drawImage(omega,80,0,480,300);
+  }
+
+  // Battle box
+  if(state==="fight" || state.startsWith("soul")){ 
+    ctx.strokeStyle="white"; ctx.strokeRect(box.x,box.y,box.w,box.h);
+  }
+
+  // Movement
+  if(state==="fight" || state.startsWith("soul")){
+    if(move.left) soul.x-=soul.speed;
+    if(move.right) soul.x+=soul.speed;
+    if(move.up) soul.y-=soul.speed;
+    if(move.down) soul.y+=soul.speed;
+    soul.x = Math.max(box.x+8, Math.min(box.x+box.w-8, soul.x));
+    soul.y = Math.max(box.y+8, Math.min(box.y+box.h-8, soul.y));
+  }
+
+  // Attack phases
+  if(state==="fight"){
+    timer++;
+    attackPattern();
+    if(timer%600===0){ phase++; if(phase>=6) state="soulcollect"; timer=0; }
+  }
+
+  // Update bullets
+  bullets.forEach(b=>{
+    b.x+=b.vx; b.y+=b.vy;
+    ctx.fillStyle="red";
+    ctx.beginPath(); ctx.arc(b.x,b.y,5,0,Math.PI*2); ctx.fill();
+    if(state==="fight" && hit(b)){
+      soul.hp--;
+      b.x=9999;
+      if(soul.hp<=0) die();
+    }
+  });
+
+  // Draw soul
+  if(state!=="dead" && state!=="crash"){
+    ctx.drawImage(soulImg,soul.x-8,soul.y-8,16,16);
+  }
+
+  // Collectible souls
+  if(state==="soulcollect"){
+    if(collectedSouls<souls.length){
+      const s=souls[collectedSouls];
+      ctx.drawImage(soulImg,s.x-8,s.y-8,16,16);
+      if(Math.hypot(s.x-soul.x,s.y-soul.y)<10){
+        collectedSouls++;
+        if(collectedSouls>=souls.length){ state="fight"; phase=6; timer=0; } // go to Phase 2-1
+      }
+    }
+  }
+
+  // UI
+  if(state==="fight" || state.startsWith("soul")) ui.innerText = `HP:${soul.hp} PHASE:${phase+1} Souls:${collectedSouls}/6`;
+
+  // Crash sequence
+  if(state==="crash"){
+    timer++;
+    const alpha = Math.min(1,timer/30);
+    ctx.globalAlpha = 1-alpha; ctx.drawImage(omega,80,0,480,300); ctx.globalAlpha=1;
+    if(timer===30){ ctx.drawImage(flowey,260,170,120,120); dlg.style.display="block"; dlg.innerText="In this world, it's kill or be killed"; }
+    if(timer>50 && timer<120){
+      for(let i=0;i<12;i++){
+        const angle=i*Math.PI/6 + (Math.random()-0.5)*0.5;
+        const startX=320+(Math.random()-0.5)*50;
+        const startY=200+(Math.random()-0.5)*50;
+        spawn(startX,startY,Math.cos(angle)*4,Math.sin(angle)*4);
+      }
+    }
+    if(timer>=120 && timer<180){ ctx.drawImage(soulImg,320-8,240-8,16,16); }
+    if(timer>=180){ ctx.fillStyle="black"; ctx.fillRect(0,0,640,480); bgm.pause(); }
+  }
+
+  // Ending
+  if(state==="ending"){
+    ctx.drawImage(flowey,260,170,120,120);
+    const centerX=320, centerY=200;
+    const r=60;
+    for(let i=0;i<7;i++){
+      const angle=i*Math.PI*2/7;
+      ctx.drawImage(soulImg,centerX+r*Math.cos(angle)-8,centerY+r*Math.sin(angle)-8,16,16);
+    }
+    // fade out BGM slowly
+    if(bgm.volume>0){ bgm.volume -= 0.005; if(bgm.volume<0) bgm.pause(); }
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// Controls
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowLeft") move.left=true;
+  if(e.key==="ArrowRight") move.right=true;
+  if(e.key==="ArrowUp") move.up=true;
+  if(e.key==="ArrowDown") move.down=true;
+  if(e.key==="r" && state==="crash") location.reload();
+});
+document.addEventListener("keyup",e=>{
+  if(e.key==="ArrowLeft") move.left=false;
+  if(e.key==="ArrowRight") move.right=false;
+  if(e.key==="ArrowUp") move.up=false;
+  if(e.key==="ArrowDown") move.down=false;
+});
+
+// Mobile buttons
+document.querySelectorAll(".btn").forEach(btn=>{
+  const dir = btn.getAttribute("data");
+  btn.addEventListener("pointerdown", e=>{ e.preventDefault(); move[dir]=true; });
+  btn.addEventListener("pointerup", e=>{ e.preventDefault(); move[dir]=false; });
+  btn.addEventListener("pointerleave", ()=>{ move[dir]=false; });
+});
+
+// Setup souls positions
+for(let i=0;i<6;i++){ souls.push({x:box.x+50+i*35, y:box.y+box.h/2}); }
+
+// Intro dialogue + start music
+say(["You idiot.","You really thought you could win?","This is MY world now."], ()=>{
+    state="fight"; timer=0; phase=0; 
+    bgm.volume = 0.6;
+    if(bgm.paused) bgm.play();
+});
+
+loop();
+</script>
+</body>
+</html>
